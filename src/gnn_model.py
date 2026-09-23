@@ -1,21 +1,42 @@
-"""
-PyTorch Geometric GAT + GRU Architecture.
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv
 
-class TemporalGAT(nn.Module):
-    def __init__(self, in_feats, hidden_feats, out_feats, heads=4):
-        super(TemporalGAT, self).__init__()
-        self.gat1 = GATConv(in_feats, hidden_feats, heads=heads, dropout=0.2)
-        self.gat2 = GATConv(hidden_feats * heads, out_feats, heads=1, dropout=0.2)
-        self.gru = nn.GRU(out_feats, out_feats, batch_first=True)
+class TemporalGraphSectorNetwork(nn.Module):
+    """
+    Institutional-grade architecture combining Graph Attention Networks (GAT)
+    and Gated Recurrent Units (GRU) for NSE sectoral index rotation.
+    """
+    def __init__(self, num_features, hidden_dim, num_classes=1, heads=4):
+        super(TemporalGraphSectorNetwork, self).__init__()
+
+        # Spatial Graph Attention Layer
+        self.gat1 = GATConv(num_features, hidden_dim, heads=heads, concat=True)
+        self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=1, concat=False)
+
+        # Temporal GRU Layer
+        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
+
+        # Output Linear Head for Expected Return / Ranking Prediction
+        self.fc = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x, edge_index, h_prev=None):
-        x = F.elu(self.gat1(x, edge_index))
-        x = F.dropout(x, p=0.2, training=self.training)
-        x = self.gat2(x, edge_index)
-        out, h_next = self.gru(x.unsqueeze(0), h_prev)
-        return out.squeeze(0), h_next
+        """
+        x: Node feature tensor [num_nodes, num_features]
+        edge_index: Graph connectivity matrix [2, num_edges]
+        h_prev: Previous hidden state for temporal recurrence
+        """
+        # 1. Spatial Graph Convolution Pass
+        x = F.relu(self.gat1(x, edge_index))
+        x = F.relu(self.gat2(x, edge_index))
+
+        # Reshape for GRU temporal sequence [batch_size=1, num_nodes, hidden_dim]
+        x = x.unsqueeze(0)
+
+        # 2. Temporal Recurrent Pass
+        out_gru, h_next = self.gru(x, h_prev)
+
+        # 3. Final Prediction Head
+        out = self.fc(out_gru.squeeze(0))
+        return out, h_next

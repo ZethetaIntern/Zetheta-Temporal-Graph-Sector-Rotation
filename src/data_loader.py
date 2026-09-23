@@ -1,15 +1,28 @@
-"""
-Data Ingestion Pipeline for NSE Sectoral Indices (Bank, IT, Pharma).
-"""
 import pandas as pd
 import numpy as np
 
-def load_nse_sector_data(filepath='nse_sectors_data.csv'):
-    try:
-        df = pd.read_csv(filepath, index_col=0, parse_dates=True)
-        return df
-    except FileNotFoundError:
-        dates = pd.date_range(start='2018-01-01', end='2026-09-01', freq='B')
-        np.random.seed(42)
-        random_walks = np.cumsum(np.random.normal(0.0003, 0.015, size=(len(dates), 3)), axis=0) + 100
-        return pd.DataFrame(random_walks, index=dates, columns=['NIFTY BANK', 'NIFTY IT', 'NIFTY PHARMA'])
+def load_and_preprocess_data(file_path):
+    """
+    Loads NSE sectoral index price data, handles missing values, 
+    and computes log returns for the sector rotation network.
+    """
+    # Read CSV data (expecting Date index and sector columns)
+    df = pd.read_csv(file_path, parse_dates=['Date'], index_col='Date')
+
+    # Handle missing values using forward fill then backward fill
+    df = df.fillna(method='ffill').fillna(method='bfill')
+
+    # Calculate daily log returns
+    log_returns = np.log(df / df.shift(1)).dropna()
+
+    return df, log_returns
+
+def create_feature_matrix(log_returns, window_size=20):
+    """
+    Generates rolling feature windows for temporal graph inputs.
+    """
+    features = []
+    for i in range(window_size, len(log_returns)):
+        window = log_returns.iloc[i-window_size:i].values
+        features.append(window)
+    return np.array(features)
